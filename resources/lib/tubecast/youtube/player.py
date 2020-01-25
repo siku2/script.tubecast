@@ -10,8 +10,8 @@ logger = kodilogging.get_logger()
 
 class CastPlayer(xbmc.Player):
     def __init__(self, youtubecastv1):
-        self.youtubecastv1 = youtubecastv1
-        self.from_yt = False # auxiliar variable to know if the request came from the youtube background thread
+        self.youtubecastv1 = youtubecastv1  # type: YoutubeCastV1
+        self.from_yt = False  # auxiliar variable to know if the request came from the youtube background thread
         self.playing = False
         self.video_id = None
         self.ctt = None

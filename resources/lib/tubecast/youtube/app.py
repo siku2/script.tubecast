@@ -35,36 +35,38 @@ class YoutubeCastV1(object):
         self.default_screen_name = get_device_id()
         self.default_screen_app = "kodi-tubecast"
         self.screen_uid = "c8277ac4-ke86-4f8b-8fe2-1236bef43397"
-        self.pairing_code = None
-        self.player = None
-        self.bind_vals = None
+        self.player = None  # type: Optional[CastPlayer]
+        self.volume_monitor = None
+        self.session = requests.Session()
 
         # Set initial state
-        self._initial_app_state()
+        self.ctt = None
+        self.cur_list = []
+        self.cur_list_id = None
+        self.current_index = None
+        self.play_state = 0
+
+        # also initialise the connected device state
+        self._initial_connection_state()
 
         # Register routes in the dial server if service discovery is being used
         if dial:
             self._setup_routes(dial)
 
-    def _initial_app_state(self):
-        self.session = requests.Session()
-        self.ctt = None
-        self.cur_list_id = None
-        self.cur_video = None
-        self.current_index = None
-        self.list_info = None
-        self.play_state = 0
+    def _initial_connection_state(self):
+        """Reset the connection state"""
+        self.has_client = False
+        self.connected_client = None
         self.screen_id = None
         self.lounge_token = None
-        self.session_id = None
         self.sid = None
         self.ofs = 0
-        self.has_client = False
-        self.volume_monitor = None
+
         self.listener = None
-        self.connected_client = None
+
         # Hold references to the index of received codes
         self.code = -1
+
         # Get service announcement data
         self.bind_vals = templates.announcement(self.screen_uid, self.default_screen_name, self.default_screen_app)
 
@@ -88,17 +90,18 @@ class YoutubeCastV1(object):
         return ""
 
     def _remove_listener(self):
-        self._initial_app_state()
+        if self.listener:
+            self.listener.stop = True
+        self._initial_connection_state()
         response.status = 200
         return ""
 
     def _pair(self, pairing_code):
         ''' called as part of service discovery '''
-        self.pairing_code = pairing_code
         self._generate_screen_id()
         self._get_lounge_token_batch()
         self._bind()
-        self._register_pairing_code()
+        self._register_pairing_code(pairing_code)
         # Listen to remote youtube server
         self.listener = YoutubeListener(app=self, ssdp=True)
         self.listener.start()
@@ -108,11 +111,11 @@ class YoutubeCastV1(object):
         self._generate_screen_id()
         self._get_lounge_token_batch()
         self._bind()
-        self.pairing_code = self._get_pairing_code()
+        code = self._get_pairing_code()
         # Listen to remote youtube server
         self.listener = YoutubeListener(app=self, ssdp=False)
         self.listener.start()
-        return self.pairing_code
+        return code
 
     def _generate_screen_id(self):
         screen_id = self.session.get(
@@ -146,13 +149,13 @@ class YoutubeCastV1(object):
         for line in bind_info.split("\n"):
             self.handle_cmd(str(line))
 
-    def _register_pairing_code(self):
+    def _register_pairing_code(self, code):
         r = self.session.post(
             "{}/api/lounge/pairing/register_pairing_code".format(self.base_url),
             data={
                 "access_type": "permanent",
                 "app": self.default_screen_app,
-                "pairing_code": self.pairing_code,
+                "pairing_code": code,
                 "screen_id": self.screen_id,
                 "screen_name": self.default_screen_name
                 },
@@ -176,17 +179,15 @@ class YoutubeCastV1(object):
 
     def handle_cmd(self, cmd):
         if get_setting_as_bool('debug-cmd'):
-            logger.debug("CMD: {}".format(cmd))
+            logger.debug("CMD: %s", cmd)
 
         if case("c", cmd):
             logger.debug("C cmd received")
-            self.sid = re.findall('"c","(.+?)"', cmd)[0]
-            self.bind_vals["SID"] = self.sid
+            self.bind_vals["SID"] = re.findall('"c","(.+?)"', cmd)[0]
 
         elif case("S", cmd):
             logger.debug("Session established received")
-            self.session_id = re.findall('"S","(.+?)"', cmd)[0]
-            self.bind_vals["gsessionid"] = self.session_id
+            self.bind_vals["gsessionid"] = re.findall('"S","(.+?)"', cmd)[0]
 
         elif case("remoteConnected", cmd):
             # Parse data
@@ -215,11 +216,9 @@ class YoutubeCastV1(object):
             if code > self.code:
                 self.code = code
                 logger.info("Remote disconnected: {}".format(data))
-                self._initial_app_state()
+                # reset the connection state but don't touch the app state
+                self._initial_connection_state()
                 kodibrigde.remote_disconnected(data["name"])
-                # Kill player if exists
-                if self.player and self.player.isPlaying:
-                    self._ready()
             else:
                 logger.debug("Command ignored, already executed before")
 
@@ -250,7 +249,7 @@ class YoutubeCastV1(object):
             if code > self.code:
                 self.code = code
                 logger.debug("updatePlaylist: {}".format(data))
-                if "videoIds" in list(data.keys()):
+                if "videoIds" in data:
                     self.cur_list = data["videoIds"].split(",")
                     if self.current_index and self.current_index >= len(self.cur_list):
                         self.current_index -= 1
@@ -339,7 +338,19 @@ class YoutubeCastV1(object):
         self.player.play_from_youtube(kodibrigde.get_youtube_plugin_path(cur_video_id))
 
     def _ready(self):
-        threading.Thread(target=self.__post_bind, args=["nowPlaying", {}]).start()
+        if self.player and self.player.isPlaying():
+            data = {
+                "videoId": self.player.video_id,
+                "currentTime": int(self.player.getTime()),
+                "ctt": self.ctt,
+                "listId": self.cur_list_id,
+                "currentIndex": self.current_index,
+                "state": self.play_state,
+            }
+        else:
+            data = {}
+
+        threading.Thread(target=self.__post_bind, args=["nowPlaying", data]).start()
 
     def pause(self, time, duration):
         self.play_state = 2
@@ -351,7 +362,7 @@ class YoutubeCastV1(object):
     def report_playback_ended(self):
         # Inform current state (stopped)
         self.__post_bind("onStateChange", {"state": "4", "currentTime": "0", "duration": "0", "cpn": "foo"})
-        if self.cur_list and isinstance(self.current_index, int) and self.current_index + 1 < len(self.cur_list):
+        if self.cur_list and self.current_index + 1 < len(self.cur_list):
             self._next()
         else:
             self._ready()
@@ -376,20 +387,21 @@ class YoutubeCastV1(object):
         kodibrigde.set_kodi_volume(int(volume))
         threading.Thread(target=self.__post_bind, args=["onVolumeChanged", {"volume": str(volume), "muted": "false"}]).start()
 
-    def __post_bind(self, sc, postdata):
+    def __post_bind(self, sc, postdata):  # type: (str, dict) -> None
         self.ofs += 1
-        post_data = {"count": "1", "ofs": str(self.ofs)}
-        post_data["req0__sc"] = sc
-        for key in list(postdata.keys()):
-            post_data["req0_" + key] = postdata[key]
+        post_data = {"count": "1", "ofs": str(self.ofs), "req0__sc": sc}
+        for key, value in postdata.iteritems():
+            post_data["req0_" + key] = value
 
         bind_vals = self.bind_vals
         bind_vals["RID"] = "1337"
-        self.session.post(
-            "{}/api/lounge/bc/bind?{}".format(
+        url = "{}/api/lounge/bc/bind?{}".format(
                 self.base_url,
                 urlencode(bind_vals)
-            ),
+            )
+        logger.debug("posting %s: %s to %s", sc, post_data, url)
+        self.session.post(
+            url,
             data=post_data,
             verify=get_setting_as_bool("verify-ssl")
         )
@@ -405,8 +417,7 @@ class YoutubeCastV1(object):
         self.player = CastPlayer(youtubecastv1=self)
         while not monitor.abortRequested() and self.has_client:
             monitor.waitForAbort(1)
-        # Del player
-        del self.player
+
         self.player = None
         # Break listener if present
         if self.listener:
@@ -422,7 +433,7 @@ class YoutubeListener(threading.Thread):
 
     def __init__(self, app, ssdp=True):
         threading.Thread.__init__(self)
-        self.app = app
+        self.app = app  # type: YoutubeCastV1
         self.stop = False
         self.ssdp = ssdp
 
@@ -438,13 +449,11 @@ class YoutubeListener(threading.Thread):
                                                                     urlencode(bind_vals)), stream=True) as self.r:
             for line in self.r.iter_lines():
                 self.app.handle_cmd(line)
-        # Restart youtube data input stream if the client is still connected
-        if self.app.has_client and not self.stop:
-            self._listen()
 
     def run(self):
-        if not self.ssdp or (self.app.has_client and not self.stop):
+        while not self.ssdp or (self.app.has_client and not self.stop):
             self._listen()
 
     def force_stop(self):
+        # FIXME: AttributeError if self.r isn't set!
         self.r.raw._fp.close()
