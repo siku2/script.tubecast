@@ -3,6 +3,7 @@
 	<category label="32003">
 		<setting label="32004" type="bool" id="enable-ssdp" default="true"/>
 		<setting label="32013" type="bool" id="verify-ssl" default="true"/>
+		<setting label="32014" type="enum" id="disconnect-action" lvalues="32015|32016"/>
 	</category>
 	<category label="32012">
 		<setting label="32005" type="bool" id="debug-ssdp" default="false"/>

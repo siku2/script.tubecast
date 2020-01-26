@@ -72,3 +72,16 @@ msgstr ""
 msgctxt "#32013"
 msgid "Verify SSL connections"
 msgstr ""
+
+# TODO better texts!
+msgctxt "#32014"
+msgid "Disconnect Action"
+msgstr ""
+
+msgctxt "#32015"
+msgid "Stop playing"
+msgstr ""
+
+msgctxt "#32016"
+msgid "Ignore and continue"
+msgstr ""
