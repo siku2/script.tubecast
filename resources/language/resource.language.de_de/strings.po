@@ -1,0 +1,74 @@
+# Kodi Media Center language file
+# Addon Name: TubeCast
+# Addon id: script.tubecast
+# Addon Provider: enen92
+msgid ""
+msgstr ""
+"Project-Id-Version: KODI Addons\n"
+"Report-Msgid-Bugs-To: https://github.com/enen92/script.tubecast/issues\n"
+"POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: Kodi Translation Team\n"
+"Language-Team: German (http://www.transifex.com/projects/p/kodi-addons/language/de_DE/)\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Language: de_DE\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+
+msgctxt "#32000"
+msgid "TubeCast"
+msgstr "TubeCast"
+
+msgctxt "#32001"
+msgid "Getting pairing code..."
+msgstr "Pairing-Code wird abgerufen..."
+
+msgctxt "#32002"
+msgid "Please insert the following code in YouTube app settings"
+msgstr "Bitte den folgenden Code in den Einstellungen der YouTube App eingeben"
+
+msgctxt "#32003"
+msgid "General"
+msgstr "Allgemein"
+
+msgctxt "#32004"
+msgid "Enable service discovery (SSDP)"
+msgstr "Aktiviere SSDP"
+
+msgctxt "#32005"
+msgid "Debug SSDP datagrams"
+msgstr "SSDP-Datagramme debuggen"
+
+msgctxt "#32006"
+msgid "connected"
+msgstr "verbunden"
+
+msgctxt "#32007"
+msgid "disconnected"
+msgstr "getrennt"
+
+msgctxt "#32008"
+msgid "Do you want to generate a new pairing code?"
+msgstr "Möchten sie einen neuen Pairing-Code generieren?"
+
+msgctxt "#32009"
+msgid "Yes"
+msgstr "Ja"
+
+msgctxt "#32010"
+msgid "No"
+msgstr "Nein"
+
+msgctxt "#32011"
+msgid "Debug youtube cmds"
+msgstr "YouTube Befehle debuggen"
+
+msgctxt "#32012"
+msgid "Debug"
+msgstr "Entwicklertools"
+
+msgctxt "#32013"
+msgid "Verify SSL connections"
+msgstr "SSL-Verbindungen verifizieren"

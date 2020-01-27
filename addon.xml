@@ -11,8 +11,10 @@
     <extension point="xbmc.addon.metadata">
         <summary lang="en_GB">Cast videos from the Youtube application to Kodi</summary>
         <summary lang="pt_PT">Cast de vídeos a partir da aplicação móvel Youtube para o Kodi</summary>
+        <summary lang="en_DE">Übertrage Videos von der YouTube App an Kodi</summary>
         <description lang="en_GB">An implementation of the Cast V1 protocol in Kodi to act as a player for the Youtube mobile application</description>
         <description lang="pt_PT">Uma implementação do protocolo Cast V1 no Kodi para este funcionar como player externo remotamente controlado pela aplicação móvel do YouTube</description>
+        <description lang="en_DE">Eine Implementation des Cast V1 Protokolls in Kodi um als Player für die YouTube App zu dienen</description>
         <platform>all</platform>
         <license>MIT</license>
         <forum>https://forum.kodi.tv/showthread.php?tid=329153</forum>
@@ -24,6 +26,7 @@
         </news>
         <disclaimer lang="en_GB">This is not a full chromecast implementation nor will it ever be. It will only work as long as Google keep backwards compatibility with the cast v1 protocol in the Youtube application. Deeply inspired by Leapcast and gotubecast projects</disclaimer>
         <disclaimer lang="pt_PT">Este addon não é uma implementação completa do protocolo cast nem nunca será. Apenas funcionará enquanto a Google mantiver a retrocompatibilidade com o protocolo cast v1 na aplicação móvel do youtube. Inspirado no Leapcast e gotubecast</disclaimer>
+        <disclaimer lang="de_DE">Dies ist keine komplette Implementation des Chromecast Protokolls und wird es auch niemals sein. Die Erweiterung funktioniert nur, solange Google die Abwärtskompatibilität mit dem Cast V1 Protokoll in der YouTube App beibehält. Inspiriert von Leapcast und gotubecast</disclaimer>
         <assets>
             <icon>resources/img/icon.png</icon>
             <fanart>resources/img/fanart.jpg</fanart>
