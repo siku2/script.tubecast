@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 import re
+import socket
 import threading
 
-from bottle import request, response
-
 import requests
+from bottle import request, response
 
 from resources.lib.kodi import kodilogging
 from resources.lib.kodi.utils import get_device_id, get_setting_as_bool
@@ -21,7 +21,6 @@ else:
     from urllib import urlencode
 
 import xbmc
-
 
 logger = kodilogging.get_logger()
 monitor = xbmc.Monitor()
@@ -62,13 +61,24 @@ class YoutubeCastV1(object):
         self.sid = None
         self.ofs = 0
 
-        self.listener = None
-
+        self.__replace_listener(None)
         # Hold references to the index of received codes
         self.code = -1
 
         # Get service announcement data
         self.bind_vals = templates.announcement(self.screen_uid, self.default_screen_name, self.default_screen_app)
+
+    def __replace_listener(self, listener):  # type: (Optional[YoutubeListener]) -> None
+        """Replace the current listener with a new one.
+
+        Takes care of stopping the previous listener in case there already is one.
+        """
+        if self.listener is not None:
+            self.listener.force_stop()
+
+        self.listener = listener
+        if listener is not None:
+            listener.start()
 
     def _setup_routes(self, dial):
         dial.route('/apps/YouTube', 'GET', self._state_listener)
@@ -103,8 +113,7 @@ class YoutubeCastV1(object):
         self._bind()
         self._register_pairing_code(pairing_code)
         # Listen to remote youtube server
-        self.listener = YoutubeListener(app=self, ssdp=True)
-        self.listener.start()
+        self.__replace_listener(YoutubeListener(app=self, ssdp=True))
 
     def pair(self):
         ''' called from external pairing_code generation script '''
@@ -113,8 +122,7 @@ class YoutubeCastV1(object):
         self._bind()
         code = self._get_pairing_code()
         # Listen to remote youtube server
-        self.listener = YoutubeListener(app=self, ssdp=False)
-        self.listener.start()
+        self.__replace_listener(YoutubeListener(app=self, ssdp=False))
         return code
 
     def _generate_screen_id(self):
@@ -198,10 +206,12 @@ class YoutubeCastV1(object):
                 self.has_client = True
                 if not self.player:
                     # Start "player" thread
-                    threading.Thread(target=self.__player_thread).start()
+                    threading.Thread(name="Player",
+                                     target=self.__player_thread).start()
                 # Start a new volume_monitor if not yet available
                 if not self.volume_monitor:
-                    threading.Thread(target=self.__monitor_volume).start()
+                    threading.Thread(name="VolumeMonitor",
+                                     target=self.__monitor_volume).start()
                 # Disable automatic playback from youtube (this is kodi not youtube :))
                 self._set_disabled()
                 # Check if it is a new association
@@ -355,7 +365,9 @@ class YoutubeCastV1(object):
         else:
             data = {}
 
-        threading.Thread(target=self.__post_bind, args=["nowPlaying", data]).start()
+        threading.Thread(name="POST nowPlaying",
+                         target=self.__post_bind,
+                         args=["nowPlaying", data]).start()
 
     def pause(self, time, duration):
         self.play_state = 2
@@ -383,14 +395,18 @@ class YoutubeCastV1(object):
 
     def _get_volume(self):
         volume = kodibrigde.get_kodi_volume()
-        threading.Thread(target=self.__post_bind, args=["onVolumeChanged", {"volume": str(volume), "muted": "false"}]).start()
+        threading.Thread(name="POST onVolumeChanged",
+                         target=self.__post_bind,
+                         args=["onVolumeChanged", {"volume": str(volume), "muted": "false"}]).start()
 
     def set_volume(self, volume):
         self._get_volume()
 
     def _set_volume(self, volume):
         kodibrigde.set_kodi_volume(int(volume))
-        threading.Thread(target=self.__post_bind, args=["onVolumeChanged", {"volume": str(volume), "muted": "false"}]).start()
+        threading.Thread(name="POST onVolumeChanged",
+                         target=self.__post_bind,
+                         args=["onVolumeChanged", {"volume": str(volume), "muted": "false"}]).start()
 
     def __send_state_change(self, current_time, duration, state=None):  # type: (float, float, int) -> None
         if state is None:
@@ -429,9 +445,10 @@ class YoutubeCastV1(object):
             monitor.waitForAbort(1)
 
         self.player = None
-        # Break listener if present
+        # Stop listener if present
         if self.listener:
             self.listener.force_stop()
+            self.listener.join()
 
     def __monitor_volume(self):
         self.volume_monitor = VolumeMonitor(self)
@@ -442,28 +459,49 @@ class YoutubeCastV1(object):
 class YoutubeListener(threading.Thread):
 
     def __init__(self, app, ssdp=True):
-        threading.Thread.__init__(self)
+        super(YoutubeListener, self).__init__(name="YoutubeListener")
         self.app = app  # type: YoutubeCastV1
         self.stop = False
         self.ssdp = ssdp
+        self.r = None  # type: Optional[requests.Response]
+
+    def __read_cmd_lines(self, url):  # type: (str) -> Iterator[str]
+        with self.app.session.get(url, stream=True) as self.r:
+            try:
+                for line in self.r.iter_lines():
+                    if self.stop:
+                        break
+
+                    yield line
+            except requests.exceptions.ChunkedEncodingError:
+                # raised when we forcefully close the socket.
+                # If we don't want to stop though, this should raise.
+                if not self.stop:
+                    raise
 
     def _listen(self):
         logger.debug("Listening to youtube remote events...")
         self.app.ofs += 1
-        bind_vals = self.app.bind_vals
+        bind_vals = self.app.bind_vals.copy()
         bind_vals["RID"] = "rpc"
         bind_vals["CI"] = "0"
         bind_vals["TYPE"] = "xmlhttp"
         bind_vals["AID"] = "3"
-        with self.app.session.get("{}/api/lounge/bc/bind?{}".format(self.app.base_url,
-                                                                    urlencode(bind_vals)), stream=True) as self.r:
-            for line in self.r.iter_lines():
-                self.app.handle_cmd(line)
+        url = "{}/api/lounge/bc/bind?{}".format(self.app.base_url, urlencode(bind_vals))
+        for line in self.__read_cmd_lines(url):
+            self.app.handle_cmd(line)
 
     def run(self):
-        while not self.ssdp or (self.app.has_client and not self.stop):
+        while not self.stop and (not self.ssdp or self.app.has_client):
             self._listen()
 
     def force_stop(self):
-        # FIXME: AttributeError if self.r isn't set!
-        self.r.raw._fp.close()
+        self.stop = True
+
+        if self.r and not self.r.raw.closed:
+            # Close the underlying socket to kill the ongoing request.
+            sock = socket.fromfd(self.r.raw.fileno(), socket.AF_INET, socket.SOCK_STREAM)
+            sock.shutdown(socket.SHUT_RDWR)
+            sock.close()
+            # request cleanup is handled by __read_cmd_lines
+
