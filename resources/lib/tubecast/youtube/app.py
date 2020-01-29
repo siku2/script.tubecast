@@ -11,7 +11,7 @@ from resources.lib.tubecast.utils import PY3
 from resources.lib.tubecast.youtube import kodibrigde
 from resources.lib.tubecast.youtube.player import CastPlayer, STATUS_LOADING, STATUS_STOPPED
 from resources.lib.tubecast.youtube.templates import YoutubeTemplates
-from resources.lib.tubecast.youtube.utils import CommandParser
+from resources.lib.tubecast.youtube.utils import CommandParser, get_related_videos
 from resources.lib.tubecast.youtube.volume import VolumeMonitor
 
 if PY3:
@@ -34,7 +34,9 @@ class CastState(object):
 
         self.playlist_id = None  # type: Optional[str]
         self.playlist = None  # type: List[str]
-        self.playlist_index = None  # type: Optional[int]
+        self.playlist_index = 0  # type: int
+
+        self.autoplay = False
 
     @property
     def video_id(self):  # type: () -> Optional[str]
@@ -47,6 +49,14 @@ class CastState(object):
     def has_playlist(self):  # type: () -> bool
         return bool(self.playlist)
 
+    @property
+    def has_previous(self):  # type: () -> bool
+        return self.has_playlist and self.playlist_index > 0
+
+    @property
+    def has_next(self):  # type: () -> bool
+        return self.has_playlist and self.playlist_index < len(self.playlist) - 1
+
     def handle_set_playlist(self, data):
         self.ctt = data["ctt"]
 
@@ -58,11 +68,11 @@ class CastState(object):
         video_ids = data.get("videoIds")
         if not video_ids:
             self.playlist = None
-            self.playlist_index = None
+            self.playlist_index = 0
             return
 
         self.playlist = video_ids.split(",")
-        if self.playlist_index is not None and self.playlist_index >= len(self.playlist):
+        if self.playlist_index >= len(self.playlist):
             self.playlist_index = len(self.playlist) - 1
 
     def _change_playlist_index(self, change):  # type: (int) -> bool
@@ -94,13 +104,39 @@ class CastState(object):
         """
         return self._change_playlist_index(-1)
 
+    def get_autoplay_video(self, video_id):  # type: (str) -> Optional[str]
+        related_videos = get_related_videos(video_id)
+        if not related_videos:
+            return None
+
+        if not self.has_playlist:
+            return related_videos[0]
+
+        played = set(self.playlist)
+        for related in related_videos:
+            if related not in played:
+                return related
+
+        return related_videos[0]
+
     def create_state_data(self):  # type: () -> dict
         if not self.has_playlist:
             return {}
 
+        # TODO figure out what CPN is
         return {"videoId": self.video_id,
                 "ctt": self.ctt,
                 "listId": self.playlist_id,
+                "currentIndex": self.playlist_index,
+                "cpn": "foo"}
+
+    def create_playlist_data(self):  # type: () -> dict
+        if not self.has_playlist:
+            return {}
+
+        return {"listId": self.playlist_id,
+                "firstVideoId": self.playlist[0],
+                "videoId": self.video_id,
                 "currentIndex": self.playlist_index}
 
 
@@ -288,9 +324,7 @@ class YoutubeCastV1(object):
                 self.volume_monitor = VolumeMonitor(self)
                 self.volume_monitor.start()
 
-            # Disable automatic playback from youtube (this is kodi not youtube :))
-            # TODO: see issue #15
-            self._disable_autoplay()
+            self.report_autoplay_mode()
             # Check if it is a new association
             if self.connected_client != data:
                 self.connected_client = data
@@ -354,6 +388,13 @@ class YoutubeCastV1(object):
             logger.debug("play received")
             self._resume()
 
+        elif name == "setAutoplayMode":
+            autoplay_enabled = data["autoplayMode"] == "ENABLED"
+            logger.debug("setAutoplayMode: %s", autoplay_enabled)
+            self.state.autoplay = autoplay_enabled
+            if autoplay_enabled:
+                self.report_autoplay_next()
+
         elif debug_cmds:
             logger.debug("unhandled command: %r", name)
 
@@ -383,13 +424,8 @@ class YoutubeCastV1(object):
         self.player.play_from_youtube(kodibrigde.get_youtube_plugin_path(self.state.video_id))
 
     def _next(self):
-        if not self.state.playlist_next():
-            return
-
-        self.player.play_from_youtube(kodibrigde.get_youtube_plugin_path(self.state.video_id))
-
-    def _disable_autoplay(self):
-        self.__post_bind("onAutoplayModeChanged", {"autoplayMode": "DISABLED"})
+        if self.state.playlist_next():
+            self.player.play_from_youtube(kodibrigde.get_youtube_plugin_path(self.state.video_id))
 
     def _set_volume(self, volume):
         kodibrigde.set_kodi_volume(int(volume))
@@ -400,9 +436,17 @@ class YoutubeCastV1(object):
         data = self.state.create_state_data()
 
         if self.player and self.player.isPlaying():
-            data.update(currentTime=str(int(self.player.getTime())), state=str(self.player.status_code))
+            data.update(currentTime=str(self.player.getTime()), state=str(self.player.status_code))
 
+        # TODO use post_bind_multiple using req0, req1, req2 prefixes
         self.__post_bind("nowPlaying", data)
+        self.__post_bind("onHasPreviousNextChanged", {
+            "hasPrevious": self.state.has_previous,
+            "hasNext": self.state.has_next
+        })
+
+        if self.state.autoplay:
+            self.report_autoplay_next()
 
     def report_playback_stopped(self):
         logger.debug("Report playback stopped")
@@ -413,12 +457,23 @@ class YoutubeCastV1(object):
         self.report_state_change(STATUS_STOPPED, 0, 0)
         if self.state.playlist_next():
             self.player.play_from_youtube(kodibrigde.get_youtube_plugin_path(self.state.video_id))
+        elif self.state.autoplay:
+            video_id = self.state.get_autoplay_video(self.state.video_id)
+            # TODO store autoplay video id in state to avoid invalidating expectations.
+            data = self.state.create_playlist_data()
+            data.update(videoId=video_id)
+            # TODO how can a man do this
+            self.__post_bind("playlistModified", data)
+            self.player.play_from_youtube(kodibrigde.get_youtube_plugin_path(video_id))
         else:
             self.report_now_playing()
 
     def report_volume(self, volume):  # type: (int) -> None
         logger.debug("Report volume")
-        self.__post_bind("onVolumeChanged", {"volume": str(volume), "muted": "false"})
+        self.__post_bind("onVolumeChanged", {
+            "volume": str(volume),
+            "muted": xbmc.getCondVisibility("Player.Muted")
+        })
 
     def report_state_change(self, status_code, current_time, duration):  # type: (int, int, int) -> None
         self.__post_bind("onStateChange",
@@ -426,6 +481,16 @@ class YoutubeCastV1(object):
                           "state": str(status_code),
                           "duration": str(duration),
                           "cpn": "foo"})
+
+    def report_autoplay_mode(self):
+        self.__post_bind("onAutoplayModeChanged", {"autoplayMode": "ENABLED" if self.state.autoplay else "DISABLED"})
+
+    def report_autoplay_next(self):
+        assert self.state.has_playlist
+        # FIXME remove assertions
+        video_id = self.state.get_autoplay_video(self.state.video_id)
+        assert video_id
+        self.__post_bind("autoplayUpNext", {"videoId": video_id})
 
     def __post_bind(self, sc, postdata):  # type: (str, dict) -> None
         self.ofs += 1

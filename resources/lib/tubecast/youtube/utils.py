@@ -79,3 +79,19 @@ def get_video_list(data):
     if "videos" in list(data.keys()):
         videos = data["videos"]
     return videos
+
+
+def get_related_videos(video_id):  # type: (str) -> List[str]
+    import youtube_requests
+    # TODO pass addon id
+    results = youtube_requests.get_related_videos(video_id)
+
+    video_ids = []
+    for res in results:
+        # results also contains the 'nextPageToken'
+        if "id" not in res:
+            continue
+
+        video_ids.append(res["id"]["videoId"])
+
+    return video_ids
