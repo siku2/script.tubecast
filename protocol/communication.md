@@ -1,24 +1,21 @@
 ---
-title: Command Message Format
+title: Communication
 ---
 
 
+YouTube uses Google's now deprecated [Channel API](https://cloud.google.com/appengine/docs/standard/java/javadoc/com/google/appengine/api/channel/package-summary) for communication between the client and the host.
+See [gvsumasl/jacc](https://github.com/gvsumasl/jacc) for a reference implementation of the protocol.
 
-YouTube uses Google's [Channel API]() for communication between the client and the host.
-See [gvsumasl/jacc](https://github.com/gvsumasl/jacc) for an implementation of the protocol.
+# Communication
 
-Here's an overview:
+# Messages
 
-## Format
-
-
-
-### Chunk
+## Chunk
 
 A chunk contains one or multiple messages.
 The chunk data itself is a valid JSON array but each chunk is prefixed by the length of the data.
 
-#### Message
+### Message
 
 Each message is an entry in the chunk's message JSON arraz.
 

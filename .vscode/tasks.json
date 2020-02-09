@@ -1,0 +1,13 @@
+{
+    // See https://go.microsoft.com/fwlink/?LinkId=733558
+    // for the documentation about the tasks.json format
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "GitHub Pages",
+            "type": "shell",
+            "command": "docker run --name github_pages -it --rm -v \"${workspaceFolder}\":/usr/src/app -p 4000:4000 starefossen/github-pages",
+            "problemMatcher": []
+        }
+    ]
+}
